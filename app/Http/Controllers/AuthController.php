@@ -3,13 +3,78 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Models\ReadingLog;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
+    /**
+     * Handle Email & Password Login
+     */
+    public function login(Request $request)
+    {
+        $request->validate([
+            'email'    => 'required|email',
+            'password' => 'required|string',
+        ]);
+
+        $user = User::where('email', $request->email)->first();
+
+        if (!$user || !Hash::check($request->password, $user->password)) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Email atau kata sandi salah.',
+            ], 401);
+        }
+
+        $sanctumToken = $user->createToken('auth-token')->plainTextToken;
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => 'Login berhasil!',
+            'data'    => [
+                'user'              => $user,
+                'token'             => $sanctumToken,
+                'is_profile_complete' => $user->isProfileComplete(),
+            ],
+        ]);
+    }
+
+    /**
+     * Handle User Registration
+     */
+    public function register(Request $request)
+    {
+        $request->validate([
+            'name'     => 'required|string|max:150',
+            'email'    => 'required|email|unique:users,email',
+            'password' => 'required|string|min:6',
+        ]);
+
+        $user = User::create([
+            'name'     => $request->name,
+            'email'    => $request->email,
+            'password' => Hash::make($request->password),
+            'role'     => 'siswa',
+        ]);
+
+        $sanctumToken = $user->createToken('auth-token')->plainTextToken;
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => 'Pendaftaran akun berhasil!',
+            'data'    => [
+                'user'              => $user,
+                'token'             => $sanctumToken,
+                'is_profile_complete' => false,
+            ],
+        ], 201);
+    }
+
     /**
      * Handle Google Login / Register via Firebase ID Token
      */
@@ -26,7 +91,6 @@ class AuthController extends Controller
         $firebaseUid = null;
 
         try {
-            // 1. Verifikasi ID Token via Google OAuth / Firebase endpoint
             $response = Http::get("https://oauth2.googleapis.com/tokeninfo?id_token={$idToken}");
 
             if ($response->successful()) {
@@ -36,7 +100,6 @@ class AuthController extends Controller
                 $avatar = $payload['picture'] ?? null;
                 $firebaseUid = $payload['sub'] ?? ($payload['user_id'] ?? null);
             } else {
-                // Fallback: Decode JWT payload jika Google endpoint mengembalikan format khusus Firebase
                 $parts = explode('.', $idToken);
                 if (count($parts) === 3) {
                     $jwtPayload = json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true);
@@ -56,7 +119,6 @@ class AuthController extends Controller
                 ], 401);
             }
 
-            // 2. Simpan atau Update User di Database MySQL
             $user = User::updateOrCreate(
                 ['email' => $email],
                 [
@@ -66,15 +128,15 @@ class AuthController extends Controller
                 ]
             );
 
-            // 3. Buat Sanctum API Token untuk sesi autentikasi Laravel
             $sanctumToken = $user->createToken('auth-token')->plainTextToken;
 
             return response()->json([
                 'status'  => 'success',
-                'message' => 'Login Google berhasil disimpan ke database!',
+                'message' => 'Login Google berhasil!',
                 'data'    => [
-                    'user'  => $user,
-                    'token' => $sanctumToken,
+                    'user'              => $user,
+                    'token'             => $sanctumToken,
+                    'is_profile_complete' => $user->isProfileComplete(),
                 ],
             ]);
 
@@ -90,13 +152,73 @@ class AuthController extends Controller
     }
 
     /**
+     * Lengkapi Profil Pengguna (Nama + Kelas)
+     */
+    public function completeProfile(Request $request)
+    {
+        $request->validate([
+            'name'  => 'required|string|max:150',
+            'kelas' => 'nullable|string|max:50',
+        ]);
+
+        $user = $request->user();
+        $user->update([
+            'name'  => $request->name,
+            'kelas' => $request->kelas,
+        ]);
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => 'Profil berhasil dilengkapi!',
+            'data'    => $user->fresh(),
+        ]);
+    }
+
+    /**
+     * Riwayat Baca User
+     */
+    public function readingHistory(Request $request)
+    {
+        $logs = ReadingLog::with('book:id,judul,slug,cover_path,penulis,jenjang,total_halaman')
+            ->where('user_id', $request->user()->id)
+            ->orderBy('read_at', 'desc')
+            ->limit(20)
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data'   => $logs,
+        ]);
+    }
+
+    /**
      * Get Current Authenticated User Info
      */
     public function me(Request $request)
     {
+        $user = $request->user();
+
         return response()->json([
             'status' => 'success',
-            'user'   => $request->user(),
+            'data'   => [
+                'user'              => $user,
+                'is_profile_complete' => $user->isProfileComplete(),
+            ],
+        ]);
+    }
+
+    /**
+     * Logout & Revoke Tokens
+     */
+    public function logout(Request $request)
+    {
+        if ($request->user()) {
+            $request->user()->currentAccessToken()->delete();
+        }
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => 'Berhasil keluar akun.',
         ]);
     }
 }
