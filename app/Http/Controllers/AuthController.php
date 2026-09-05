@@ -179,7 +179,7 @@ class AuthController extends Controller
      */
     public function readingHistory(Request $request)
     {
-        $logs = ReadingLog::with('book:id,judul,slug,cover_path,penulis,jenjang,total_halaman')
+        $logs = ReadingLog::with('book:id,judul,slug,cover_path,file_path,penulis,jenjang,total_halaman')
             ->where('user_id', $request->user()->id)
             ->orderBy('read_at', 'desc')
             ->limit(20)

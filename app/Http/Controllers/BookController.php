@@ -70,7 +70,9 @@ class BookController extends Controller
      */
     public function show(string $slug): JsonResponse
     {
-        $book = Book::with('category')->where('slug', $slug)->first();
+        $book = Book::with('category')->where(function($q) use ($slug) {
+            $q->where('id', $slug)->orWhere('slug', $slug);
+        })->first();
 
         if (!$book) {
             return response()->json([
