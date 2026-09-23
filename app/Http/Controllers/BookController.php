@@ -102,17 +102,53 @@ class BookController extends Controller
             ], 404);
         }
 
-        $book->increment('total_dibaca');
-
         $user = $request->user('sanctum') ?? auth('sanctum')->user();
-        $log = ReadingLog::create([
-            'user_id' => $user ? $user->id : null,
-            'book_id' => $book->id,
-            'platform' => in_array($request->platform, ['web', 'mobile']) ? $request->platform : 'web',
-            'halaman_terakhir' => $request->get('halaman_terakhir', 1),
-            'durasi_detik' => $request->get('durasi_detik', 0),
-            'read_at' => now(),
-        ]);
+        $userId = $user ? $user->id : null;
+        $logId = $request->input('log_id');
+        $durasiDetik = (int) $request->input('durasi_detik', 0);
+        $halamanTerakhir = (int) $request->input('halaman_terakhir', 1);
+        $platform = in_array($request->platform, ['web', 'mobile']) ? $request->platform : 'web';
+
+        $log = null;
+
+        // 1. Cek jika log_id dikirimkan dan log tersebut valid
+        if ($logId) {
+            $log = ReadingLog::where('id', $logId)
+                ->where('book_id', $book->id)
+                ->when($userId, fn($q) => $q->where('user_id', $userId))
+                ->first();
+        }
+
+        // 2. Fallback: jika log_id belum ada / tidak terkirim, cek apakah user membaca buku yang sama dalam 30 menit terakhir
+        if (!$log && $userId) {
+            $log = ReadingLog::where('user_id', $userId)
+                ->where('book_id', $book->id)
+                ->where('read_at', '>=', now()->subMinutes(30))
+                ->orderBy('id', 'desc')
+                ->first();
+        }
+
+        if ($log) {
+            // Perbarui sesi berjalan: jangan buat baris baru, jangan gandakan sesi, jangan re-increment total_dibaca
+            $log->durasi_detik = max((int) $log->durasi_detik, $durasiDetik);
+            if ($halamanTerakhir > 0) {
+                $log->halaman_terakhir = $halamanTerakhir;
+            }
+            $log->read_at = now();
+            $log->save();
+        } else {
+            // Sesi baru: baru kita buat baris log dan increment total_dibaca buku
+            $book->increment('total_dibaca');
+
+            $log = ReadingLog::create([
+                'user_id' => $userId,
+                'book_id' => $book->id,
+                'platform' => $platform,
+                'halaman_terakhir' => $halamanTerakhir,
+                'durasi_detik' => $durasiDetik,
+                'read_at' => now(),
+            ]);
+        }
 
         return response()->json([
             'status' => 'success',

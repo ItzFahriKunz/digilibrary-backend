@@ -35,21 +35,54 @@ class AdminController extends Controller
         $webPercent = $totalLogCount > 0 ? round(($webReads / $totalLogCount) * 100) : 55;
         $mobilePercent = $totalLogCount > 0 ? round(($mobileReads / $totalLogCount) * 100) : 45;
 
-        // 2. Tren Aktivitas Membaca 7 Hari Terakhir
-        $dailyTrend = [];
+        // 2. Tren Aktivitas Membaca Multi-Periode (7 Hari, 30 Hari, 1 Tahun)
         $dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+        $monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+        // A. 7 Hari Terakhir
+        $trend7d = [];
         for ($i = 6; $i >= 0; $i--) {
             $date = Carbon::today()->subDays($i);
-            $dayOfWeek = $dayNames[$date->dayOfWeek];
             $count = ReadingLog::whereDate('read_at', $date)->count();
-            
-            $dailyTrend[] = [
-                'day'       => $dayOfWeek,
+            $trend7d[] = [
+                'day'       => $dayNames[$date->dayOfWeek],
+                'label'     => $dayNames[$date->dayOfWeek] . ' (' . $date->format('d/m') . ')',
                 'date'      => $date->format('d M'),
                 'count'     => $count,
                 'is_today'  => $i === 0,
             ];
         }
+
+        // B. 30 Hari Terakhir
+        $trend30d = [];
+        for ($i = 29; $i >= 0; $i--) {
+            $date = Carbon::today()->subDays($i);
+            $count = ReadingLog::whereDate('read_at', $date)->count();
+            $trend30d[] = [
+                'label'     => $date->format('d M'),
+                'date'      => $date->format('Y-m-d'),
+                'count'     => $count,
+                'is_today'  => $i === 0,
+            ];
+        }
+
+        // C. 12 Bulan Terakhir
+        $trend1y = [];
+        for ($i = 11; $i >= 0; $i--) {
+            $monthDate = Carbon::today()->startOfMonth()->subMonths($i);
+            $start = $monthDate->copy()->startOfMonth();
+            $end = $monthDate->copy()->endOfMonth();
+            $count = ReadingLog::whereBetween('read_at', [$start, $end])->count();
+            $trend1y[] = [
+                'label'     => $monthNames[$monthDate->month - 1] . ' ' . $monthDate->format('y'),
+                'month'     => $monthNames[$monthDate->month - 1],
+                'year'      => $monthDate->year,
+                'count'     => $count,
+                'is_current'=> $i === 0,
+            ];
+        }
+
+        $dailyTrend = $trend7d;
 
         // 3. Distribusi Buku per Kategori
         $categoryStats = Category::withCount('books')
@@ -97,6 +130,17 @@ class AdminController extends Controller
                     'web_percent'    => $webPercent,
                     'mobile_percent' => $mobilePercent,
                     'total_logs'     => $totalLogCount,
+                ],
+                'user_distribution' => [
+                    'siswa' => User::where('role', 'siswa')->count(),
+                    'guru'  => User::where('role', 'guru')->count(),
+                    'admin' => User::where('role', 'admin')->count(),
+                    'total' => $totalUsers,
+                ],
+                'reading_trends' => [
+                    '7d'  => $trend7d,
+                    '30d' => $trend30d,
+                    '1y'  => $trend1y,
                 ],
                 'daily_trend'       => $dailyTrend,
                 'category_stats'    => $categoryStats,
@@ -257,32 +301,166 @@ class AdminController extends Controller
         ]);
     }
 
+    public function showUser(int $id): JsonResponse
+    {
+        $user = User::withCount('readingLogs')
+            ->with(['readingLogs' => function ($q) {
+                $q->with('book:id,judul,slug,cover_path')
+                  ->orderBy('read_at', 'desc')
+                  ->limit(10);
+            }])
+            ->find($id);
+
+        if (!$user) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Pengguna tidak ditemukan',
+            ], 404);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data'   => $user,
+        ]);
+    }
+
+        /**
+     * Sanitasi kelas untuk guru: jika kosong atau bernilai "none"/"tidak ada", kembalikan null.
+     * Jika format valid (misal "4A" atau "Kelas 4A"), kembalikan "Kelas 4A".
+     */
+    protected function sanitizeGuruKelas(?string $raw): ?string
+    {
+        if (!$raw) return null;
+        $trimmed = trim($raw);
+        $lower = strtolower($trimmed);
+        if (in_array($lower, ['none', 'tidak ada', 'belum ditugaskan', '-', 'null', ''])) {
+            return null;
+        }
+        $cleanCode = strtoupper(trim(preg_replace('/^Kelas\s+/i', '', $trimmed)));
+        return "Kelas {$cleanCode}";
+    }
+
+    /**
+     * Sanitasi kelas untuk siswa.
+     */
+    protected function sanitizeSiswaKelas(?string $raw): ?string
+    {
+        if (!$raw) return null;
+        $trimmed = trim($raw);
+        $lower = strtolower($trimmed);
+        if (in_array($lower, ['none', 'tidak ada', 'belum ditugaskan', '-', 'null', ''])) {
+            return null;
+        }
+        $cleanCode = strtoupper(trim(preg_replace('/^Kelas\s+/i', '', $trimmed)));
+        return "Kelas {$cleanCode}";
+    }
+
+    /**
+     * Cek apakah kelas sudah memiliki wali kelas guru lain.
+     */
+    protected function checkWaliKelasConflict(string $kelas, ?int $excludeUserId = null): ?User
+    {
+        $cleanCode = strtoupper(trim(preg_replace('/^Kelas\s+/i', '', $kelas)));
+        $variants = [
+            $cleanCode,
+            "Kelas {$cleanCode}",
+            strtolower($cleanCode),
+            "kelas {$cleanCode}",
+        ];
+
+        $query = User::where('role', 'guru')
+            ->where(function ($q) use ($variants) {
+                $q->whereIn('kelas', $variants);
+            });
+
+        if ($excludeUserId) {
+            $query->where('id', '!=', $excludeUserId);
+        }
+
+        return $query->first();
+    }
+
     public function storeUser(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'name'     => 'required|string|max:150',
             'email'    => 'required|email|unique:users,email',
-            'password' => 'required|string|min:6',
+            'password' => 'nullable|string|min:6',
             'role'     => 'required|in:admin,guru,siswa',
             'kelas'    => 'nullable|string|max:50',
         ]);
 
+        $role = $validated['role'];
+        $kelas = $validated['kelas'] ?? null;
+
+        // Normalisasi dan validasi kelas untuk Guru, Siswa, dan Admin
+        if ($role === 'admin') {
+            $kelas = null;
+        } elseif ($role === 'guru') {
+            $kelas = $this->sanitizeGuruKelas($kelas);
+            if ($kelas) {
+                $conflict = $this->checkWaliKelasConflict($kelas);
+                if ($conflict) {
+                    return response()->json([
+                        'status'  => 'error',
+                        'message' => "{$kelas} sudah memiliki wali kelas atas nama \"{$conflict->name}\". Setiap kelas hanya berhak memiliki satu wali kelas.",
+                    ], 422);
+                }
+            }
+        } elseif ($role === 'siswa') {
+            $kelas = $this->sanitizeSiswaKelas($kelas);
+        }
+
+        $tempPassword = !empty($validated['password']) 
+            ? $validated['password'] 
+            : 'Perpus' . rand(10000, 99999);
+
         $user = User::create([
             'name'     => $validated['name'],
             'email'    => $validated['email'],
-            'password' => Hash::make($validated['password']),
-            'role'     => $validated['role'],
-            'kelas'    => $validated['kelas'] ?? null,
+            'password' => Hash::make($tempPassword),
+            'role'     => $role,
+            'kelas'    => $kelas,
         ]);
+
+        $userData = $user->toArray();
+        $userData['generated_password'] = empty($validated['password']) ? $tempPassword : null;
 
         return response()->json([
             'status'  => 'success',
             'message' => 'Pengguna baru berhasil ditambahkan',
-            'data'    => $user,
+            'data'    => $userData,
         ], 201);
     }
 
-    public function updateUser(Request $request, int $id): JsonResponse
+    public function resetUserPassword(int $id): JsonResponse
+    {
+        $user = User::find($id);
+
+        if (!$user) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Pengguna tidak ditemukan',
+            ], 404);
+        }
+
+        $tempPassword = 'Siswa' . rand(10000, 99999);
+        $user->password = Hash::make($tempPassword);
+        $user->save();
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => 'Kata sandi pengguna ' . $user->name . ' berhasil direset secara otomatis.',
+            'data'    => [
+                'user_id'            => $user->id,
+                'name'               => $user->name,
+                'email'              => $user->email,
+                'temporary_password' => $tempPassword,
+            ]
+        ]);
+    }
+
+        public function updateUser(Request $request, int $id): JsonResponse
     {
         $user = User::find($id);
 
@@ -294,18 +472,53 @@ class AdminController extends Controller
         }
 
         $validated = $request->validate([
-            'name'     => 'sometimes|required|string|max:150',
-            'email'    => 'sometimes|required|email|unique:users,email,' . $id,
-            'role'     => 'sometimes|required|in:admin,guru,siswa',
-            'kelas'    => 'nullable|string|max:50',
-            'password' => 'nullable|string|min:6',
+            'name'        => 'sometimes|required|string|max:150',
+            'role'        => 'sometimes|required|in:admin,guru,siswa',
+            'kelas'       => 'nullable|string|max:50',
+            'password'    => 'nullable|string|min:6',
+            'avatar_file' => 'nullable|file|image|max:5120',
+            'avatar'      => 'nullable|string',
         ]);
+
+        $effectiveRole = $validated['role'] ?? $user->role;
+
+        if ($request->has('kelas') || isset($validated['role'])) {
+            $rawKelas = $request->input('kelas', $user->kelas);
+
+            if ($effectiveRole === 'admin') {
+                $validated['kelas'] = null;
+            } elseif ($effectiveRole === 'guru') {
+                $kelas = $this->sanitizeGuruKelas($rawKelas);
+                if ($kelas) {
+                    $conflict = $this->checkWaliKelasConflict($kelas, $user->id);
+                    if ($conflict) {
+                        return response()->json([
+                            'status'  => 'error',
+                            'message' => "{$kelas} sudah memiliki wali kelas atas nama \"{$conflict->name}\". Setiap kelas hanya berhak memiliki satu wali kelas.",
+                        ], 422);
+                    }
+                }
+                $validated['kelas'] = $kelas;
+            } elseif ($effectiveRole === 'siswa') {
+                $validated['kelas'] = $this->sanitizeSiswaKelas($rawKelas);
+            }
+        }
+
+        if ($request->hasFile('avatar_file')) {
+            $path = $request->file('avatar_file')->store('avatars', 'public');
+            $validated['avatar'] = asset('storage/' . $path);
+        } elseif ($request->filled('avatar')) {
+            $validated['avatar'] = $request->avatar;
+        }
 
         if (!empty($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
         } else {
             unset($validated['password']);
         }
+
+        // Jangan izinkan modifikasi email demi menjaga keamanan akun
+        unset($validated['email']);
 
         $user->update($validated);
 

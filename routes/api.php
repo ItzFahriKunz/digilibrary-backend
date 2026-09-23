@@ -7,6 +7,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\BookController;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\TeacherController;
 
 /*
 |--------------------------------------------------------------------------
@@ -16,6 +17,9 @@ use App\Http\Controllers\AdminController;
 
 // Auth (Public)
 Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/auth/verify-otp', [AuthController::class, 'verifyOtp']);
+Route::post('/auth/reset-password', [AuthController::class, 'resetPassword']);
 Route::post('/auth/register', [AuthController::class, 'register']);
 Route::post('/auth/google', [AuthController::class, 'googleLogin']);
 
@@ -37,9 +41,11 @@ Route::delete('/admin/books/{id}', [AdminController::class, 'destroyBook']);
 
 // Manajemen Pengguna (Admin)
 Route::get('/admin/users', [AdminController::class, 'users']);
+Route::get('/admin/users/{id}', [AdminController::class, 'showUser']);
 Route::post('/admin/users', [AdminController::class, 'storeUser']);
 Route::put('/admin/users/{id}', [AdminController::class, 'updateUser']);
 Route::delete('/admin/users/{id}', [AdminController::class, 'destroyUser']);
+Route::post('/admin/users/{id}/reset-password', [AdminController::class, 'resetUserPassword']);
 
 /*
 |--------------------------------------------------------------------------
@@ -51,7 +57,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::put('/auth/complete-profile', [AuthController::class, 'completeProfile']);
     Route::get('/user/reading-history', [AuthController::class, 'readingHistory']);
+    Route::post('/user/profile', [AuthController::class, 'updateProfile']);
+    Route::put('/user/password', [AuthController::class, 'updatePassword']);
     Route::get('/user', function (Request $request) {
         return $request->user();
     });
+
+    // Ruang Guru / Wali Kelas (Pemantauan 24 Kelas)
+    Route::get('/guru/overview', [TeacherController::class, 'overview']);
+    Route::put('/guru/my-class', [TeacherController::class, 'updateMyClass']);
 });
