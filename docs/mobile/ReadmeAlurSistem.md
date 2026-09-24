@@ -430,14 +430,18 @@ sequenceDiagram
     App->>App: Render PDF Canvas + Cetak Watermark Siswa
     App->>Siswa: Buku Siap Dibaca di Layar
 
+    Note over App,Backend: Request Pertama: Kirim tanpa log_id
+    App->>Backend: POST /api/books/{id}/track-read { duration_seconds: 30, page_number: 1, platform: 'mobile' }
+    Backend->>DB: INSERT INTO reading_logs & total_dibaca + 1
+    DB-->>Backend: Data Log Tersimpan
+    Backend-->>App: 200 OK { data: { log_id: 101, total_dibaca: ... } }
+
     loop Setiap 30 Detik Membaca Aktif
         Siswa->>App: Aktivitas Membaca (Sentuh Layar)
-        App->>App: Hitung Durasi Aktif (+30s)
-        App->>Backend: POST /api/books/{id}/track-read { durasi: 30, page: 12, platform: 'mobile' }
-        Backend->>DB: INSERT INTO reading_logs (user_id, book_id, durasi_detik, read_at)
-        Backend->>DB: UPDATE books SET total_dibaca = total_dibaca + 1
-        DB-->>Backend: Data Log Tersimpan
-        Backend-->>App: 200 OK
+        App->>App: Akumulasi Durasi (+30s)
+        App->>Backend: POST /api/books/{id}/track-read { log_id: 101, duration_seconds: 60, page_number: 5 }
+        Backend->>DB: UPDATE reading_logs SET durasi_detik = max(durasi), read_at = now() WHERE id = 101
+        Backend-->>App: 200 OK { data: { log_id: 101 } }
     end
 
     Siswa->>App: Menekan Tombol Kembali / Selesai Membaca

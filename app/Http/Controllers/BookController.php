@@ -105,8 +105,9 @@ class BookController extends Controller
         $user = $request->user('sanctum') ?? auth('sanctum')->user();
         $userId = $user ? $user->id : null;
         $logId = $request->input('log_id');
-        $durasiDetik = (int) $request->input('durasi_detik', 0);
-        $halamanTerakhir = (int) $request->input('halaman_terakhir', 1);
+        // Mendukung penamaan field bahasa Indonesia (durasi_detik/halaman_terakhir) maupun Inggris (duration_seconds/page_number)
+        $durasiDetik = (int) ($request->input('durasi_detik') ?? $request->input('duration_seconds') ?? 0);
+        $halamanTerakhir = (int) ($request->input('halaman_terakhir') ?? $request->input('page_number') ?? 1);
         $platform = in_array($request->platform, ['web', 'mobile']) ? $request->platform : 'web';
 
         $log = null;

@@ -274,19 +274,42 @@ Semua request terproteksi wajib menyertakan header:
 
 #### 4. Catat Sesi Membaca Aktif (Tracking)
 * **Endpoint**: `POST /api/books/{id}/track-read`
-* **Request Body**:
+* **Dual Field Naming Support**: Controller backend mendukung penamaan field bahasa Indonesia maupun bahasa Inggris secara fleksibel:
+  * **Durasi Baca**: Menggunakan `duration_seconds` atau `durasi_detik` (tipe `integer`, detik).
+  * **Halaman Terakhir**: Menggunakan `page_number` atau `halaman_terakhir` (tipe `integer`).
+  * **Platform**: Nilai `"mobile"` atau `"web"`.
+  * **ID Sesi (Opsional)**: `log_id` (tipe `integer`), didapatkan dari respons permintaan pertama.
+
+* **Request Body (Sesi Pertama / Saat Mulai Membaca)**:
   ```json
   {
     "duration_seconds": 30,
-    "page_number": 15,
+    "page_number": 5,
     "platform": "mobile"
   }
   ```
+  *(Atau format bahasa Indonesia: `{"durasi_detik": 30, "halaman_terakhir": 5, "platform": "mobile"}`)*
+
 * **Response (200 OK)**:
   ```json
   {
     "status": "success",
-    "message": "Sesi membaca berhasil dicatat"
+    "message": "Sesi membaca berhasil dicatat",
+    "data": {
+      "total_dibaca": 12,
+      "log_id": 565
+    }
+  }
+  ```
+
+* **Request Body (Sinkronisasi Periodik / Kelipatan 30 Detik & Saat Menutup Buku)**:
+  Simpan `data.log_id` dari respons sebelumnya, lalu kirimkan di interval berikutnya. Server otomatis memperbarui sesi berjalan (`durasi_detik = max(durasi_lama, durasi_baru)`) tanpa membuat baris baru atau menggandakan `total_dibaca`:
+  ```json
+  {
+    "log_id": 565,
+    "duration_seconds": 60,
+    "page_number": 8,
+    "platform": "mobile"
   }
   ```
 
