@@ -22,29 +22,13 @@ class User extends Authenticatable
         'avatar',
         'role',
         'kelas',
+        'nisn',
+        'jenis_kelamin',
     ];
 
     /**
      * The attributes that should be hidden for serialization.
      */
-    
-    /**
-     * Appended accessors for serialization.
-     */
-    protected $appends = [
-        'has_password',
-        'is_google',
-    ];
-
-    public function getHasPasswordAttribute(): bool
-    {
-        return !empty($this->password);
-    }
-
-    public function getIsGoogleAttribute(): bool
-    {
-        return !empty($this->firebase_uid);
-    }
     protected $hidden = [
         'password',
         'remember_token',
@@ -82,4 +66,4 @@ class User extends Authenticatable
         // Siswa wajib punya nama dan kelas
         return !empty($this->name) && !empty($this->kelas);
     }
-}
+}   
