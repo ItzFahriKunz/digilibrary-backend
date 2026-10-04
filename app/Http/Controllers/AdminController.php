@@ -3,6 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Book;
+use App\Models\TahunAjaran;
+use App\Models\Kelas;
+use App\Models\SiswaKelas;
+use App\Models\WaliKelas;
 use App\Models\Category;
 use App\Models\ReadingLog;
 use App\Models\User;
@@ -184,6 +188,7 @@ class AdminController extends Controller
         }
 
         $slug = Str::slug($validated['judul']) . '-' . Str::random(5);
+        $validated['uploaded_by'] = $request->user()?->id;
 
         $book = Book::create(array_merge($validated, [
             'slug' => $slug,
@@ -289,6 +294,9 @@ class AdminController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                   ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('nis', 'like', "%{$search}%")
+                    ->orWhere('nisn', 'like', "%{$search}%")
+                  ->orWhere('nip', 'like', "%{$search}%")
                   ->orWhere('kelas', 'like', "%{$search}%");
             });
         }
@@ -387,6 +395,9 @@ class AdminController extends Controller
             'email'    => 'required|email|unique:users,email',
             'password' => 'nullable|string|min:6',
             'role'     => 'required|in:admin,guru,siswa',
+            'nis'      => 'nullable|string|max:30',
+            'nisn'     => 'nullable|string|max:30',
+            'nip'      => 'nullable|string|max:30',
             'kelas'    => 'nullable|string|max:50',
         ]);
 
@@ -420,8 +431,30 @@ class AdminController extends Controller
             'email'    => $validated['email'],
             'password' => Hash::make($tempPassword),
             'role'     => $role,
+            'nis'      => $validated['nis'] ?? null,
+            'nisn'     => $validated['nisn'] ?? null,
+            'nip'      => $validated['nip'] ?? null,
             'kelas'    => $kelas,
         ]);
+
+        $activeTa = TahunAjaran::getActive();
+        if ($activeTa && $kelas) {
+            $codeClean = strtoupper(trim(str_ireplace('kelas', '', $kelas)));
+            $targetKelas = Kelas::where('nama_rombel', $codeClean)->where('tahun_ajaran_id', $activeTa->id)->first();
+            if ($targetKelas) {
+                if ($role === 'siswa') {
+                    SiswaKelas::updateOrCreate(
+                        ['user_id' => $user->id, 'tahun_ajaran_id' => $activeTa->id],
+                        ['kelas_id' => $targetKelas->id, 'status' => 'aktif']
+                    );
+                } elseif ($role === 'guru') {
+                    WaliKelas::updateOrCreate(
+                        ['kelas_id' => $targetKelas->id, 'tahun_ajaran_id' => $activeTa->id],
+                        ['user_id' => $user->id]
+                    );
+                }
+            }
+        }
 
         $userData = $user->toArray();
         $userData['generated_password'] = empty($validated['password']) ? $tempPassword : null;
@@ -474,6 +507,9 @@ class AdminController extends Controller
         $validated = $request->validate([
             'name'        => 'sometimes|required|string|max:150',
             'role'        => 'sometimes|required|in:admin,guru,siswa',
+            'nis'         => 'nullable|string|max:30',
+            'nisn'        => 'nullable|string|max:30',
+            'nip'         => 'nullable|string|max:30',
             'kelas'       => 'nullable|string|max:50',
             'password'    => 'nullable|string|min:6',
             'avatar_file' => 'nullable|file|image|max:5120',

@@ -5,6 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\Book;
 use App\Models\ReadingLog;
 use App\Models\User;
+use App\Models\TahunAjaran;
+use App\Models\Kelas;
+use App\Models\WaliKelas;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -49,6 +52,13 @@ class TeacherController extends Controller
         $user = $request->user();
         $isAdmin = $user?->role === 'admin';
 
+        if ($user?->role !== 'guru' && !$isAdmin) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Hanya Guru / Wali Kelas dan Administrator yang memiliki akses ke dasbor pemantauan kelas.',
+            ], 403);
+        }
+
         // Guru HANYA memantau kelas binaannya sendiri!
         if (!$isAdmin) {
             $rawClass = $user?->kelas;
@@ -82,7 +92,7 @@ class TeacherController extends Controller
             $requestedClass = $request->get('kelas');
             $currentClass = ($requestedClass ? $this->normalizeClass($requestedClass) : null)
                 ?? ($user?->kelas ? $this->normalizeClass($user->kelas) : null)
-                ?? '4A';
+                ?? '1A';
         }
 
         $teacherAssignedClass = ($user?->kelas ? $this->normalizeClass($user->kelas) : null);
@@ -100,7 +110,7 @@ class TeacherController extends Controller
             ->where(function ($q) use ($classVariants) {
                 $q->whereIn('kelas', $classVariants);
             })
-            ->select('id', 'name', 'email', 'avatar', 'kelas')
+            ->select('id', 'name', 'email', 'avatar', 'kelas', 'nip')
             ->first();
 
         // 2. Ambil seluruh siswa di kelas ini
@@ -108,7 +118,7 @@ class TeacherController extends Controller
             ->where(function ($q) use ($classVariants) {
                 $q->whereIn('kelas', $classVariants);
             })
-            ->select('id', 'name', 'email', 'avatar', 'kelas', 'created_at')
+            ->select('id', 'name', 'email', 'avatar', 'kelas', 'nis', 'nisn', 'created_at')
             ->get();
 
         $studentIds = $students->pluck('id')->toArray();
@@ -204,9 +214,8 @@ class TeacherController extends Controller
             ];
         }
 
-        // Leaderboard: Urutkan siswa dari buku terbanyak dibaca & progres tertinggi
-        $leaderboard = $studentsData;
-        usort($leaderboard, function ($a, $b) {
+        // Leaderboard & Siswa: Urutkan seluruh siswa dari buku terbanyak dibaca & progres tertinggi
+        usort($studentsData, function ($a, $b) {
             if ($b['books_count'] !== $a['books_count']) {
                 return $b['books_count'] <=> $a['books_count'];
             }
@@ -216,22 +225,29 @@ class TeacherController extends Controller
             return $b['total_duration_minutes'] <=> $a['total_duration_minutes'];
         });
 
-        foreach ($leaderboard as $idx => &$item) {
-            $rank = $idx + 1;
-            $item['rank'] = $rank;
-            if ($rank === 1 && $item['books_count'] > 0) {
-                $item['badge'] = 'Bintang Literasi #1';
-            } elseif ($rank === 2 && $item['books_count'] > 0) {
-                $item['badge'] = 'Juara Baca #2';
-            } elseif ($rank === 3 && $item['books_count'] > 0) {
-                $item['badge'] = 'Juara Baca #3';
+        // Tetapkan peringkat & lencana untuk seluruh siswa kelas
+        $currentRank = 1;
+        foreach ($studentsData as &$item) {
+            if ($item['books_count'] > 0) {
+                $item['rank'] = $currentRank;
+                if ($currentRank === 1) {
+                    $item['badge'] = 'Bintang Literasi #1';
+                } elseif ($currentRank === 2) {
+                    $item['badge'] = 'Juara Baca #2';
+                } elseif ($currentRank === 3) {
+                    $item['badge'] = 'Juara Baca #3';
+                } else {
+                    $item['badge'] = null;
+                }
+                $currentRank++;
             } else {
+                $item['rank'] = null;
                 $item['badge'] = null;
             }
         }
         unset($item);
 
-        $topReaders = array_values(array_filter($leaderboard, fn($s) => $s['books_count'] > 0));
+        $topReaders = array_values(array_filter($studentsData, fn($s) => $s['books_count'] > 0));
         $podium = array_slice($topReaders, 0, 5);
 
         $totalStudents = count($students);
@@ -338,6 +354,11 @@ class TeacherController extends Controller
             $targetUser->kelas = null;
             $targetUser->save();
 
+            $activeTa = TahunAjaran::getActive();
+            if ($activeTa) {
+                WaliKelas::where('user_id', $targetUser->id)->where('tahun_ajaran_id', $activeTa->id)->delete();
+            }
+
             return response()->json([
                 'status'  => 'success',
                 'message' => "Penugasan wali kelas untuk {$targetUser->name} berhasil dikosongkan (Belum Ditugaskan).",
@@ -371,6 +392,22 @@ class TeacherController extends Controller
 
         $targetUser->kelas = "Kelas {$cleanClass}";
         $targetUser->save();
+
+        $activeTa = TahunAjaran::getActive();
+        if ($activeTa) {
+            $targetKelas = Kelas::where('nama_rombel', $cleanClass)->where('tahun_ajaran_id', $activeTa->id)->first();
+            if ($targetKelas) {
+                WaliKelas::updateOrCreate(
+                    [
+                        'kelas_id'        => $targetKelas->id,
+                        'tahun_ajaran_id' => $activeTa->id,
+                    ],
+                    [
+                        'user_id' => $targetUser->id,
+                    ]
+                );
+            }
+        }
 
         return response()->json([
             'status'  => 'success',

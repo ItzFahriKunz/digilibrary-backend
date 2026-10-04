@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Book extends Model
 {
@@ -11,6 +13,7 @@ class Book extends Model
 
     protected $fillable = [
         'category_id',
+        'uploaded_by',
         'judul',
         'slug',
         'penulis',
@@ -36,12 +39,17 @@ class Book extends Model
 
     protected $appends = ['pdf_url', 'cover_url'];
 
-    public function category()
+    public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
     }
 
-    public function readingLogs()
+    public function uploader(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'uploaded_by');
+    }
+
+    public function readingLogs(): HasMany
     {
         return $this->hasMany(ReadingLog::class);
     }

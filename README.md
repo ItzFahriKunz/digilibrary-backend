@@ -1,3 +1,13 @@
+# 📚 Digilibrary SD - REST API Backend (Laravel 11)
+
+> **Sistem Perpustakaan Digital Sekolah Dasar Berstandar Kurikulum Merdeka & SIBI Kemendikdasmen**  
+> Mendukung integrasi Web Application (React + Vite) dan Mobile Application (Android Kotlin / Jetpack Compose).
+
+### 📱 Dokumentasi Khusus Pengembang Mobile (Android Kotlin):
+- 📘 **[Panduan Lengkap Mobile API & Integrasi Kotlin (README_MOBILE.md)](./README_MOBILE.md)** atau **[(docs/mobile/README.md)](./docs/mobile/README.md)**
+- 📑 **[Buku Panduan Arsitektur Sistem, Use Case, Flowchart & ERD (docs/mobile/ReadmeAlurSistem.md)](./docs/mobile/ReadmeAlurSistem.md)**
+
+---
 <p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 
 <p align="center">

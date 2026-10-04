@@ -8,6 +8,7 @@ use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\BookController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\TeacherController;
+use App\Http\Controllers\ClassManagementController;
 
 /*
 |--------------------------------------------------------------------------
@@ -66,4 +67,14 @@ Route::middleware('auth:sanctum')->group(function () {
     // Ruang Guru / Wali Kelas (Pemantauan 24 Kelas)
     Route::get('/guru/overview', [TeacherController::class, 'overview']);
     Route::put('/guru/my-class', [TeacherController::class, 'updateMyClass']);
+
+    // Manajemen 24 Kelas, Kuota & Tahun Ajaran (Khusus Admin)
+    Route::get('/admin/classes', [ClassManagementController::class, 'index']);
+    Route::get('/admin/classes/{id}/students', [ClassManagementController::class, 'showStudents']);
+    Route::post('/admin/classes/{id}/assign-wali', [ClassManagementController::class, 'assignWali']);
+    Route::put('/admin/classes/{id}/quota', [ClassManagementController::class, 'updateQuota']);
+    Route::post('/admin/classes/{id}/students', [ClassManagementController::class, 'addStudent']);
+    Route::delete('/admin/classes/{id}/students/{studentId}', [ClassManagementController::class, 'removeStudent']);
+    Route::post('/admin/academic-years', [ClassManagementController::class, 'storeAcademicYear']);
+    Route::put('/admin/academic-years/{id}/activate', [ClassManagementController::class, 'activateAcademicYear']);
 });

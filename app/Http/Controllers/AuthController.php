@@ -84,11 +84,15 @@ class AuthController extends Controller
      */
     public function googleLogin(Request $request)
     {
-        $request->validate([
-            'token' => 'required|string',
-        ]);
+        $idToken = $request->input('token') ?? $request->input('id_token');
 
-        $idToken = $request->input('token');
+        if (!$idToken) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Token autentikasi Google (token / id_token) wajib diisi.',
+            ], 422);
+        }
+
         $email = null;
         $name = null;
         $avatar = null;
@@ -101,7 +105,7 @@ class AuthController extends Controller
                 $payload = $response->json();
                 $email = $payload['email'] ?? null;
                 $name = $payload['name'] ?? ($payload['email'] ?? 'Google User');
-                $avatar = $payload['picture'] ?? null;
+                $avatar = $payload['picture'] ?? $request->input('avatar') ?? null;
                 $firebaseUid = $payload['sub'] ?? ($payload['user_id'] ?? null);
             } else {
                 $parts = explode('.', $idToken);
@@ -110,7 +114,7 @@ class AuthController extends Controller
                     if ($jwtPayload && isset($jwtPayload['email'])) {
                         $email = $jwtPayload['email'];
                         $name = $jwtPayload['name'] ?? explode('@', $email)[0];
-                        $avatar = $jwtPayload['picture'] ?? null;
+                        $avatar = $jwtPayload['picture'] ?? $request->input('avatar') ?? null;
                         $firebaseUid = $jwtPayload['user_id'] ?? ($jwtPayload['sub'] ?? null);
                     }
                 }
@@ -236,15 +240,28 @@ class AuthController extends Controller
         $request->validate([
             'name'   => 'required|string|max:150',
             'kelas'  => 'nullable|string|max:50',
+            'nis'    => 'nullable|string|max:30',
+            'nisn'   => 'nullable|string|max:30',
+            'nip'    => 'nullable|string|max:30',
         ]);
 
         $avatarPath = $user->avatar;
 
-        // Jika upload file gambar avatar fisik
-        if ($request->hasFile('avatar_file')) {
+        // Jika pengguna meminta menghapus foto profil (kembali ke inisial abjad)
+        if ($request->input('remove_avatar') == '1' || $request->boolean('remove_avatar')) {
+            if ($user->avatar && str_starts_with($user->avatar, '/storage/avatars/')) {
+                $oldFile = str_replace('/storage/', '', $user->avatar);
+                Storage::disk('public')->delete($oldFile);
+            }
+            $avatarPath = null;
+        } elseif ($request->hasFile('avatar_file')) {
             $request->validate([
                 'avatar_file' => 'image|mimes:jpeg,png,jpg,webp,gif|max:3072',
             ]);
+            if ($user->avatar && str_starts_with($user->avatar, '/storage/avatars/')) {
+                $oldFile = str_replace('/storage/', '', $user->avatar);
+                Storage::disk('public')->delete($oldFile);
+            }
             $path = $request->file('avatar_file')->store('avatars', 'public');
             $avatarPath = '/storage/' . $path;
         } elseif ($request->filled('avatar')) {
@@ -252,47 +269,31 @@ class AuthController extends Controller
             $avatarPath = $request->avatar;
         }
 
+        // KEAMANAN KETAT:
+        // Role dan Kelas TIDAK BISA diubah sembarangan oleh user biasa melalui formulir profil!
+        // Hak penugasan kelas dan penetapan wali kelas mutlak dipegang oleh Administrator melalui Panel Admin.
         $newKelas = $user->kelas;
-        if ($request->has('kelas')) {
-            $raw = trim($request->input('kelas') ?? '');
-            if ($user->role === 'admin') {
-                $newKelas = null;
-            } elseif ($user->role === 'guru') {
-                if (in_array(strtolower($raw), ['none', 'tidak ada', 'belum ditugaskan', '-', 'null', ''])) {
-                    $newKelas = null;
-                } else {
-                    $cleanCode = strtoupper(trim(preg_replace('/^Kelas\s+/i', '', $raw)));
-                    $newKelas = "Kelas {$cleanCode}";
-
-                    // Pastikan tidak tabrakan dengan guru lain
-                    $conflict = User::where('role', 'guru')
-                        ->where('id', '!=', $user->id)
-                        ->whereIn('kelas', [$cleanCode, $newKelas, strtolower($cleanCode), "kelas {$cleanCode}"])
-                        ->first();
-
-                    if ($conflict) {
-                        return response()->json([
-                            'status'  => 'error',
-                            'message' => "{$newKelas} sudah memiliki wali kelas atas nama \"{$conflict->name}\". Setiap kelas hanya berhak memiliki satu wali kelas.",
-                        ], 422);
-                    }
-                }
-            } else {
-                // Siswa
-                if (in_array(strtolower($raw), ['none', 'tidak ada', 'belum ditugaskan', '-', 'null', ''])) {
-                    $newKelas = null;
-                } else {
-                    $cleanCode = strtoupper(trim(preg_replace('/^Kelas\s+/i', '', $raw)));
-                    $newKelas = "Kelas {$cleanCode}";
-                }
-            }
+        if ($user->role === 'admin') {
+            $newKelas = null;
         }
 
-        $user->update([
+        $updateData = [
             'name'   => $request->name,
             'kelas'  => $newKelas,
             'avatar' => $avatarPath,
-        ]);
+        ];
+
+        if ($request->has('nis')) {
+            $updateData['nis'] = $request->input('nis') ? trim($request->input('nis')) : null;
+        }
+        if ($request->has('nisn')) {
+            $updateData['nisn'] = $request->input('nisn') ? trim($request->input('nisn')) : null;
+        }
+        if ($request->has('nip')) {
+            $updateData['nip'] = $request->input('nip') ? trim($request->input('nip')) : null;
+        }
+
+        $user->update($updateData);
 
         return response()->json([
             'status'  => 'success',
