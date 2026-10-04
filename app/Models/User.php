@@ -25,9 +25,9 @@ class User extends Authenticatable
         'role',
         'nis',
         'nisn',
-        'jenis_kelamin',
         'nip',
         'kelas',
+        'jenis_kelamin',
     ];
 
     /**
@@ -65,7 +65,7 @@ class User extends Authenticatable
     }
 
     /**
-     * Relasi ke log pembacaan buku.
+     * Relasi ke reading_logs (aktivitas membaca).
      */
     public function readingLogs()
     {
@@ -117,9 +117,8 @@ class User extends Authenticatable
      */
     public function isProfileComplete(): bool
     {
-        // Admin dan guru tidak wajib isi kelas
         if ($this->role === 'admin' || $this->role === 'guru') {
-            return true;
+            return !empty($this->name);
         }
 
         // Siswa wajib punya nama dan kelas
